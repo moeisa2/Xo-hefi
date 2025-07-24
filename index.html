@@ -1,0 +1,204 @@
+<!DOCTYPE html><html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hefi XO Online 3D</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: linear-gradient(to right, #ffdee9, #b5fffc);
+      text-align: center;
+      margin: 0;
+      padding: 0;
+    }.login, .game {
+  display: none;
+  margin-top: 50px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 6px;
+  margin: 30px auto;
+  width: 95%;
+  max-width: 600px;
+  perspective: 1000px;
+}
+
+.cell {
+  background: #fff;
+  border: 1px solid #ddd;
+  font-size: 28px;
+  height: 60px;
+  line-height: 60px;
+  cursor: pointer;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+  transform-style: preserve-3d;
+  transition: transform 0.3s ease, background 0.3s ease;
+}
+
+.cell:hover {
+  background: #ffe0f0;
+  transform: rotateY(10deg) rotateX(10deg) scale(1.05);
+}
+
+.cell:active {
+  transform: rotateY(-10deg) rotateX(-10deg) scale(0.97);
+}
+
+#winner {
+  font-size: 22px;
+  margin: 10px;
+  font-weight: bold;
+  color: #4a148c;
+}
+
+input, button {
+  padding: 12px;
+  margin: 10px;
+  font-size: 18px;
+  border-radius: 8px;
+  border: none;
+  box-shadow: 2px 2px 6px rgba(0,0,0,0.2);
+}
+
+button {
+  background: #ff4081;
+  color: white;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #e91e63;
+}
+
+h2 {
+  color: #880e4f;
+}
+
+  </style>
+</head>
+<body>  <div class="login" id="login">
+    <h2>Masukkan Nama dan Kode Ruangan</h2>
+    <input type="text" id="nameInput" placeholder="Nama"><br>
+    <input type="text" id="roomInput" placeholder="Kode Ruangan"><br>
+    <button onclick="joinGame()">Mulai</button>
+  </div>  <div class="game" id="game">
+    <h2 id="roomTitle"></h2>
+    <div id="turnInfo"></div>
+    <div class="grid" id="grid"></div>
+    <div id="winner"></div>
+  </div>  <!-- Firebase SDK -->  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDMkW_cZQUP9Fb-XXXXXXXXXXXXXX",
+      authDomain: "hefi-love-game.firebaseapp.com",
+      projectId: "hefi-love-game",
+      storageBucket: "hefi-love-game.appspot.com",
+      messagingSenderId: "347257937190",
+      appId: "1:347257937190:web:xxxxxxxxxxxxxxxx",
+      databaseURL: "https://hefi-love-game-default-rtdb.firebaseio.com"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const loginDiv = document.getElementById("login");
+    const gameDiv = document.getElementById("game");
+    const grid = document.getElementById("grid");
+    const winnerDiv = document.getElementById("winner");
+    const roomTitle = document.getElementById("roomTitle");
+    const turnInfo = document.getElementById("turnInfo");
+
+    let playerName = "", playerSymbol = "", roomCode = "", isMyTurn = false;
+
+    loginDiv.style.display = "block";
+
+    function joinGame() {
+      playerName = document.getElementById("nameInput").value.trim();
+      roomCode = document.getElementById("roomInput").value.trim();
+      if (!playerName || !roomCode) return alert("Masukkan nama dan kode ruangan.");
+
+      const roomRef = db.ref("rooms/" + roomCode);
+      roomRef.once("value", snap => {
+        const data = snap.val();
+        if (!data) {
+          roomRef.set({
+            players: { player1: playerName },
+            board: Array(100).fill(""),
+            turn: "X",
+            status: "waiting"
+          });
+          playerSymbol = "X";
+          isMyTurn = true;
+        } else {
+          const players = data.players || {};
+          if (players.player2) return alert("Ruangan sudah penuh!");
+          roomRef.child("players/player2").set(playerName);
+          roomRef.child("status").set("playing");
+          playerSymbol = "O";
+          isMyTurn = false;
+        }
+        loginDiv.style.display = "none";
+        gameDiv.style.display = "block";
+        roomTitle.textContent = "Ruangan: " + roomCode;
+        listenToRoom(roomRef);
+      });
+    }
+
+    function listenToRoom(roomRef) {
+      roomRef.on("value", snap => {
+        const data = snap.val();
+        if (!data || !data.board) return;
+        const board = data.board;
+        grid.innerHTML = "";
+        board.forEach((cell, i) => {
+          const div = document.createElement("div");
+          div.className = "cell";
+          div.innerHTML = cell === "X" ? "❤️" : cell === "O" ? "💛" : "";
+          div.onclick = () => makeMove(i, roomRef, data);
+          grid.appendChild(div);
+        });
+        if (data.status === "playing") {
+          turnInfo.innerText = data.turn === playerSymbol ? "Giliran Kamu!" : "Menunggu lawan...";
+          isMyTurn = data.turn === playerSymbol;
+        }
+        if (data.winner) {
+          winnerDiv.innerHTML = `🎉 ${data.winner} menang!`;
+          turnInfo.innerHTML = "";
+        }
+      });
+    }
+
+    function makeMove(index, roomRef, data) {
+      if (!isMyTurn || data.board[index] !== "" || data.winner) return;
+      data.board[index] = playerSymbol;
+      const nextTurn = playerSymbol === "X" ? "O" : "X";
+      const winner = checkWin(data.board);
+      roomRef.update({
+        board: data.board,
+        turn: nextTurn,
+        winner: winner
+      });
+    }
+
+    function checkWin(board) {
+      const lines = [];
+      for (let r = 0; r < 10; r++) {
+        for (let c = 0; c < 10; c++) {
+          const i = r * 10 + c;
+          if (c <= 4) lines.push([i, i+1, i+2, i+3, i+4, i+5]);
+          if (r <= 4) lines.push([i, i+10, i+20, i+30, i+40, i+50]);
+          if (r <= 4 && c <= 4) lines.push([i, i+11, i+22, i+33, i+44, i+55]);
+          if (r <= 4 && c >= 5) lines.push([i, i+9, i+18, i+27, i+36, i+45]);
+        }
+      }
+      for (const line of lines) {
+        const [a, b, c, d, e, f] = line;
+        if (board[a] && board[a] === board[b] && board[a] === board[c] && board[a] === board[d] && board[a] === board[e] && board[a] === board[f]) {
+          return board[a];
+        }
+      }
+      return null;
+    }
+  </script></body>
+</html>
